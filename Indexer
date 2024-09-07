@@ -1,0 +1,18 @@
+import java.io.Serializable;
+import java.util.List;
+import java.util.Map;
+
+public class Indexer implements Serializable {
+    private static final long serialVersionUID = 1L;
+    private Map<Integer, List<String>> index;
+
+    public Indexer(Map<Integer, List<String>> index) {
+        this.index = index;
+    }
+
+    public Map<Integer, List<String>> getIndex() {
+        return index;
+    }
+}
+
+
