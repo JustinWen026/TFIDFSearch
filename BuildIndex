@@ -1,0 +1,67 @@
+import java.io.*;
+import java.nio.file.Paths;
+import java.util.*;
+import java.util.stream.IntStream;
+
+public class BuildIndex {
+    private static final long serialVersionUID = 1L;
+
+    public static void main(String[] args) {
+        if (args.length != 1) {
+            System.out.println("Usage: java BuildIndex <corpusFilePath>");
+            return;
+        }
+
+        String corpusFilePath = args[0];
+        String[] pathParts = corpusFilePath.split("/");
+        String corpusFileName = pathParts[pathParts.length - 1];
+        String indexFileName = corpusFileName.substring(0, corpusFileName.lastIndexOf('.'));
+
+        try {
+            List<List<String>> docs = readAndProcessDocs(corpusFilePath);
+            Map<Integer, List<String>> index = new HashMap<>();
+
+            IntStream.range(0, docs.size()).forEach(i -> index.put(i, docs.get(i)));
+
+            Indexer indexer = new Indexer(index);
+
+            try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(indexFileName))) {
+                oos.writeObject(indexer);
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static List<List<String>> readAndProcessDocs(String filePath) throws IOException {
+        List<List<String>> docs = new ArrayList<>();
+        BufferedReader reader = new BufferedReader(new FileReader(filePath));
+        String line;
+        List<String> currentDoc = new ArrayList<>();
+        int sentenceCount = 0;
+
+        while ((line = reader.readLine()) != null) {
+            String[] parts = line.split("\t", 2);
+            if (parts.length < 2) continue;
+            String originalSentence = parts[1];
+            String sentence = originalSentence.replaceAll("[^a-zA-Z]", " ").toLowerCase().replaceAll("\\s+", " ").trim();
+
+            currentDoc.addAll(Arrays.asList(sentence.split(" ")));
+            sentenceCount++;
+            if (sentenceCount == 5) {
+                docs.add(new ArrayList<>(currentDoc));
+                currentDoc.clear();
+                sentenceCount = 0;
+            }
+        }
+
+        if (!currentDoc.isEmpty()) {
+            docs.add(currentDoc);
+        }
+        reader.close();
+        return docs;
+    }
+}
+
+
