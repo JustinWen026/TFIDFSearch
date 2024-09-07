@@ -1,0 +1,170 @@
+import java.io.*;
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class TFIDFSearch {
+    public static void main(String[] args) {
+        if (args.length != 2) {
+            System.out.println("Usage: java TFIDFSearch <corpusBaseName> <testCaseFilePath>");
+            return;
+        }
+
+        String corpusBaseName = args[0];
+        String testCaseFilePath = args[1];
+
+        // Extract the filename from the testCaseFilePath
+        String[] pathParts = testCaseFilePath.split("/");
+        String testCaseFileName = pathParts[pathParts.length - 1];
+
+        // Construct the index file path
+        String indexFilePath = corpusBaseName;
+
+        try {
+            Indexer indexer;
+            try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(indexFilePath))) {
+                indexer = (Indexer) ois.readObject();
+            }
+
+            Trie trie = buildTrie(indexer.getIndex());
+            Map<String, Double> idfMap = calculateIdf(indexer.getIndex().values());
+
+            List<String> queries;
+            int n;
+            try (BufferedReader reader = new BufferedReader(new FileReader(testCaseFilePath))) {
+                n = Integer.parseInt(reader.readLine().trim());
+                queries = reader.lines().map(String::trim).collect(Collectors.toList());
+            }
+
+            List<List<Integer>> results = new ArrayList<>();
+            for (String query : queries) {
+                results.add(processQuery(query, indexer, trie, idfMap, n));
+            }
+
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter("output.txt"))) {
+                for (List<Integer> result : results) {
+                    writer.write(result.stream().map(String::valueOf).collect(Collectors.joining(" ")));
+                    writer.newLine();
+                }
+            }
+
+        } catch (IOException | ClassNotFoundException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static List<Integer> processQuery(String query, Indexer indexer, Trie trie, Map<String, Double> idfMap, int n) {
+        String[] tokens = query.split(" ");
+        Set<Integer> docIDs = new HashSet<>();
+        boolean isAndQuery = query.contains(" AND ");
+        boolean isOrQuery = query.contains(" OR ");
+
+        if (isAndQuery) {
+            docIDs = new HashSet<>(trie.getDocsContainingWord(tokens[0]));
+            for (int i = 2; i < tokens.length; i += 2) {
+                docIDs.retainAll(trie.getDocsContainingWord(tokens[i]));
+            }
+        } else if (isOrQuery) {
+            docIDs = new HashSet<>(trie.getDocsContainingWord(tokens[0]));
+            for (int i = 2; i < tokens.length; i += 2) {
+                docIDs.addAll(trie.getDocsContainingWord(tokens[i]));
+            }
+        } else {
+            docIDs = trie.getDocsContainingWord(tokens[0]);
+        }
+
+        Map<Integer, Double> docScores = new HashMap<>();
+        for (int docID : docIDs) {
+            double score = 0.0;
+            for (String token : tokens) {
+                if (!token.equals("AND") && !token.equals("OR")) {
+                    score += tfIdfCalculate(indexer.getIndex().get(docID), token, idfMap);
+                }
+            }
+            docScores.put(docID, score);
+        }
+
+        List<Integer> result = docScores.entrySet().stream()
+                .sorted((a, b) -> {
+                    int cmp = Double.compare(b.getValue(), a.getValue());
+                    if (cmp != 0) return cmp;
+                    return Integer.compare(a.getKey(), b.getKey());
+                })
+                .limit(n)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+
+        while (result.size() < n) {
+            result.add(-1);
+        }
+
+        return result;
+    }
+
+    private static Trie buildTrie(Map<Integer, List<String>> index) {
+        Trie trie = new Trie();
+        for (Map.Entry<Integer, List<String>> entry : index.entrySet()) {
+            int docID = entry.getKey();
+            for (String word : entry.getValue()) {
+                trie.insert(word, docID);
+            }
+        }
+        return trie;
+    }
+
+    private static Map<String, Double> calculateIdf(Collection<List<String>> docs) {
+        Map<String, Double> idfMap = new HashMap<>();
+        int totalDocs = docs.size();
+
+        for (List<String> doc : docs) {
+            Set<String> uniqueTerms = new HashSet<>(doc);
+            for (String term : uniqueTerms) {
+                idfMap.merge(term, 1.0, Double::sum);
+            }
+        }
+
+        for (Map.Entry<String, Double> entry : idfMap.entrySet()) {
+            idfMap.put(entry.getKey(), Math.log((double) totalDocs / entry.getValue()));
+        }
+
+        return idfMap;
+    }
+
+    private static double tfIdfCalculate(List<String> doc, String term, Map<String, Double> idfMap) {
+        double tf = tf(doc, term);
+        double idf = idfMap.getOrDefault(term, 0.0);
+        return tf * idf;
+    }
+
+    private static double tf(List<String> doc, String term) {
+        long count = doc.stream().filter(word -> word.equals(term)).count();
+        return (double) count / doc.size();
+    }
+
+    static class TrieNode {
+        Map<Character, TrieNode> children = new HashMap<>();
+        Set<Integer> docIDs = new HashSet<>();
+    }
+
+    static class Trie {
+        private final TrieNode root = new TrieNode();
+
+        public void insert(String word, int docID) {
+            TrieNode node = root;
+            for (char c : word.toCharArray()) {
+                node = node.children.computeIfAbsent(c, k -> new TrieNode());
+            }
+            node.docIDs.add(docID);
+        }
+
+        public Set<Integer> getDocsContainingWord(String word) {
+            TrieNode node = root;
+            for (char c : word.toCharArray()) {
+                node = node.children.get(c);
+                if (node == null) return new HashSet<>();
+            }
+            return node.docIDs;
+        }
+    }
+}
+
+
